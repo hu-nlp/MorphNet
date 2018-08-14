@@ -14,7 +14,7 @@ if __name__ == '__main__':
     parser.add_option("--model", dest="model", help="Load/Save model file", metavar="FILE", default="model")
     parser.add_option("--cembedding", type="int", dest="cembedding_dims", default=64)
     parser.add_option("--epochs", type="int", dest="epochs", default=30)
-    # parser.add_option("--lr", type="float", dest="learning_rate", default=None)
+    #parser.add_option("--lr", type="float", dest="learning_rate", default=0.0001)
     parser.add_option("--outdir", type="string", dest="output", default="results")
     parser.add_option("--lstmdims", type="int", dest="lstm_dims", default=512)
     parser.add_option("--droputrate", type="float", dest="dropout_rate", default=0.3)
@@ -78,7 +78,7 @@ if __name__ == '__main__':
         parser.train(options.conll_train)
 
         if options.conll_dev == "N/A":
-            parser.Save(os.path.join(options.output, os.path.basename(options.model)))
+            parser.save(os.path.join(options.output, os.path.basename(options.model)))
 
         else:
             devPredSents = parser.predict(options.conll_dev)
@@ -91,21 +91,22 @@ if __name__ == '__main__':
                 for entry in conll_devSent:
                     if entry.id <= 0:
                         continue
-                    if len(entry.predicted_sequence) == len(entry.decoder_input):
+                    if len(entry.predicted_sequence) == len(entry.decoder_gold_output):
                         all_equal = True
-                        for g,p in zip(entry.decoder_input, entry.predicted_sequence):
+                        for g,p in zip(entry.decoder_gold_output, entry.predicted_sequence):
                             if g != p:
                                 all_equal = False
                         if all_equal:
                             correct += 1
                     count += 1
             print "---\nAccuracy:\t%.2f" % (float(correct) * 100 / count)
+
             score = float(correct) * 100 / count
             if score >= highestScore:
                 parser.save(os.path.join(options.output, os.path.basename(options.model)))
                 highestScore = score
                 eId = epoch + 1
 
-            print "Highest POS&LAS: %.2f at epoch %d" % (highestScore, eId)
+            print "Highest: %.2f at epoch %d" % (highestScore, eId)
 
 

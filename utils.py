@@ -21,9 +21,17 @@ class ConllEntry:
         self.pred_parent_id = None
         self.pred_relation = None
         self.pred_pos = None
+        self.predicted_sequence = None
 
         self.idChars = []
         self.idFeats = []
+        self.decoder_gold_input = []
+        self.decoder_gold_output = []
+
+        self.comb = None
+        self.context_enc = None
+        self.word_enc = None
+
 
     def __str__(self):
         values = [str(self.id), self.form, self.lemma, self.pred_pos, self.xpos, self.feats,
@@ -108,12 +116,9 @@ def read_conll(fh, c2i):
                         decoder_input.append(c2i["_UNK"])
 
                 decoder_input.extend(entry.idFeats)
-                decoder_input += [c2i["</s>"]]
 
-                #decoder_output = decoder_input[1:] + [c2i["</s>"]]
-
-                entry.decoder_input = decoder_input
-                # entry.decoder_output = decoder_output
+                entry.decoder_gold_input = decoder_input
+                entry.decoder_gold_output = decoder_input[1:] + [c2i["</s>"]]
 
                 tokens.append(entry)
 
