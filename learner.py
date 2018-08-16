@@ -113,7 +113,7 @@ class Learner:
                         if predicted == self.c2i["</s>"]:
                             entry.predicted_sequence.append(predicted)
                             stop = True
-                        elif counter < 50:
+                        elif counter > 50:
                             stop = True
                         else:
                             entry.predicted_sequence.append(predicted)
