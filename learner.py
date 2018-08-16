@@ -59,7 +59,7 @@ class Learner:
         start = time.time()
         with open(conll_path, 'r') as conllFP:
             for iSentence, sentence in enumerate(read_conll(conllFP, self.c2i)):
-                if iSentence % 20 == 0:
+                if iSentence % 500 == 0:
                     print "Prediction : Processing sentence number: %d" % iSentence, ", Time: %.2f" % (time.time() - start)
                     start = time.time()
 
@@ -201,6 +201,6 @@ class Learner:
                 total += cur_loss
                 total_losses.backward()
                 self.trainer.update()
-                if iSentence != 0 and iSentence % 20 == 0:
+                if iSentence != 0 and iSentence % 500 == 0:
                     print "Processing sentence number: %d" % iSentence, ", Time: %.2f" % (time.time() - start) , " Loss:" + str(total / (iSentence + 1))
                     start = time.time()
