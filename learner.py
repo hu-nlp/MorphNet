@@ -15,16 +15,18 @@ from utils import read_conll
 
 
 class Learner:
-    def __init__(self, c2i, options):
+    def __init__(self, c2i, features, options):
         self.model = dy.ParameterCollection()
         random.seed(1)
-        self.trainer = dy.AdadeltaTrainer(self.model)
+        self.trainer = dy.AdamTrainer(self.model)
 
         self.dropput_rate = options.dropout_rate
         self.ldims = options.lstm_dims
         self.cdims = options.cembedding_dims
 
         self.c2i = c2i
+        self.i2c = {self.c2i[k]:k for k in self.c2i}
+        self.features = features
 
         self.W_d = self.model.add_parameters((self.ldims, 2 * self.ldims))
         self.W_db = self.model.add_parameters(self.ldims)
@@ -47,12 +49,18 @@ class Learner:
     def load(self, filename):
         self.model.populate(filename)
 
+    def convert2chars(self, lst):
+        s = []
+        for i in lst:
+            s.append(self.i2c[i])
+        return s
+
     def predict(self, conll_path):
         start = time.time()
         with open(conll_path, 'r') as conllFP:
             for iSentence, sentence in enumerate(read_conll(conllFP, self.c2i)):
-                if iSentence % 500 == 0:
-                    print "Processing sentence number: %d" % iSentence, ", Time: %.2f" % (time.time() - start)
+                if iSentence % 20 == 0:
+                    print "Prediction : Processing sentence number: %d" % iSentence, ", Time: %.2f" % (time.time() - start)
                     start = time.time()
 
                 dy.renew_cg()
@@ -61,13 +69,11 @@ class Learner:
                 for entry in conll_sentence:
                     c_embeddings = []
                     for c in entry.idChars:
-                        # TODO : try different formulas like alpha/(alpha + #(w))
-                        dropFlag = False  # random.random() < self.dropput_rate
                         c_embedding = self.clookup[c]
                         c_embeddings.append(c_embedding)
 
                     e_i = self.word_encoder.predict_sequence(c_embeddings)[-1]
-                    entry.word_enc = e_i #dy.dropout(e_i, self.dropput_rate)
+                    entry.word_enc = e_i
                     entry.context_lstms = [entry.word_enc, entry.word_enc]
 
                 # II- Context encoding
@@ -88,31 +94,34 @@ class Learner:
                     entry.context_enc = dy.rectify(self.W_d.expr() * entry.context_enc + self.W_db.expr())
 
                 output_state = self.output_encoder.initial_state()
+                output_state = output_state.add_input(self.clookup[self.c2i["<st>"]])
                 for entry in conll_sentence:
                     # III- Output encoding
-                    if output_state.output():
-                        entry.comb = entry.word_enc + output_state.output()
-                    else:
-                        entry.comb = entry.word_enc
+                    entry.comb = entry.word_enc + output_state.output()
 
                     # IV- Decoder
-                    decoder_state = self.decoder.initial_state().set_s(
-                        [entry.context_enc, dy.tanh(entry.context_enc), entry.comb, dy.tanh(entry.comb)])
+                    decoder_state = self.decoder.initial_state().set_s([entry.context_enc,entry.context_enc,entry.comb, entry.comb])
                     entry.predicted_sequence = []
-                    predicted_char = self.c2i["<s>"]
+                    predicted = self.c2i["<s>"]
                     counter = 0
-                    while True:
+                    stop = False
+                    while not stop:
                         counter += 1
-                        decoder_state.add_input(self.clookup[predicted_char])
+                        decoder_state = decoder_state.add_input(self.clookup[predicted])
                         probs = self.softmax(decoder_state.output())
-                        predicted_char = probs.npvalue().argmax()
-                        if predicted_char != self.c2i["</s>"] and counter < 50:
-                            entry.predicted_sequence.append(predicted_char)
+                        predicted = probs.npvalue().argmax()
+                        if predicted == self.c2i["</s>"]:
+                            entry.predicted_sequence.append(predicted)
+                            stop = True
+                        elif counter < 50:
+                            stop = True
                         else:
-                            break
+                            entry.predicted_sequence.append(predicted)
+
                     for seq_i in entry.predicted_sequence:
-                        tag_embedding = self.clookup[seq_i]
-                        decoder_state.add_input(tag_embedding)
+                        if seq_i in self.features:
+                            tag_embedding = self.clookup[seq_i]
+                            output_state = output_state.add_input(tag_embedding)
 
                 yield conll_sentence
 
@@ -138,13 +147,11 @@ class Learner:
                 for entry in conll_sentence:
                     c_embeddings = []
                     for c in entry.idChars:
-                        # TODO : try different formulas like alpha/(alpha + #(w))
-                        dropFlag = False  # random.random() < self.dropput_rate
-                        c_embedding = self.clookup[c if not dropFlag else 0]
+                        c_embedding = self.clookup[c]
                         c_embeddings.append(c_embedding)
 
                     e_i = self.word_encoder.predict_sequence(c_embeddings)[-1]
-                    entry.word_enc = e_i # dy.dropout(e_i, self.dropput_rate)
+                    entry.word_enc = e_i
                     entry.context_lstms = [entry.word_enc, entry.word_enc]
 
                 # II- Context encoding
@@ -167,18 +174,16 @@ class Learner:
 
                 probs = []
                 losses = []
-
+                #TODO init tag
                 output_state = self.output_encoder.initial_state()
+                output_state = output_state.add_input(self.clookup[self.c2i["<st>"]])
                 for entry in conll_sentence:
                     # III- Output encoding
-                    if output_state.output():
-                        entry.comb = entry.word_enc + output_state.output()
-                    else:
-                        entry.comb = entry.word_enc
+                    entry.comb = entry.word_enc + output_state.output()
 
                     # IV- Decoder
-                    decoder_state = self.decoder.initial_state().set_s(
-                        [entry.context_enc, dy.tanh(entry.context_enc), entry.comb, dy.tanh(entry.comb)])
+                    # TODO
+                    decoder_state = self.decoder.initial_state().set_s([entry.context_enc, entry.context_enc,entry.comb, entry.comb])
 
                     for gold in entry.decoder_gold_input:
                         decoder_state = decoder_state.add_input(self.clookup[gold])
@@ -187,7 +192,7 @@ class Learner:
 
                     for gold in entry.idFeats:
                         tag_embedding = self.clookup[gold]
-                        output_state.add_input(tag_embedding)
+                        output_state = output_state.add_input(tag_embedding)
 
                     losses += [-dy.log(dy.pick(p, o)) for p, o in zip(probs, entry.decoder_gold_output)]
 

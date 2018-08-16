@@ -42,8 +42,8 @@ class ConllEntry:
 
 def vocab(conll_path):
     # Character vocabulary
-    c2i = {"_UNK": 0, "<s>": 1, "</s>":2}
-
+    c2i = {"_UNK": 0, "<s>": 1, "</s>":2, "<st>":3}
+    features = set()
     tokens = []
 
     for line in open(conll_path, 'r'):
@@ -66,15 +66,14 @@ def vocab(conll_path):
 
                 feats_of_word = []
                 for feat in tok[5].split("|"):
-                    feat_val = feat.split("=")[1] if feat != "_" else feat
-                    if feat_val not in c2i:
-                        c2i[feat_val] = len(c2i)
-                    feats_of_word.append(c2i[feat_val])
+                    if feat not in c2i:
+                        c2i[feat] = len(c2i)
+                        features.add(c2i[feat])
+                    feats_of_word.append(c2i[feat])
                 entry.idFeats = feats_of_word
-
                 tokens.append(entry)
 
-    return c2i
+    return c2i, features
 
 
 def read_conll(fh, c2i):
@@ -101,9 +100,8 @@ def read_conll(fh, c2i):
 
                 feats_of_word = []
                 for feat in tok[5].split("|"):
-                    feat_val = feat.split("=")[1] if feat != "_" else feat
-                    if feat_val in c2i:
-                        feats_of_word.append(c2i[feat_val])
+                    if feat in c2i:
+                        feats_of_word.append(c2i[feat])
                     else:
                         feats_of_word.append(c2i["_UNK"])
                 entry.idFeats = feats_of_word
@@ -119,7 +117,6 @@ def read_conll(fh, c2i):
 
                 entry.decoder_gold_input = decoder_input
                 entry.decoder_gold_output = decoder_input[1:] + [c2i["</s>"]]
-
                 tokens.append(entry)
 
     if len(tokens) > 1:
