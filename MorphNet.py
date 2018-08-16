@@ -60,17 +60,15 @@ if __name__ == '__main__':
             correct = 0
             for idSent, devSent in enumerate(devPredSents):
                 conll_devSent = [entry for entry in devSent if isinstance(entry, utils.ConllEntry)]
-
                 for entry in conll_devSent:
                     if entry.id <= 0:
                         continue
-                    if len(entry.predicted_sequence) == len(entry.decoder_gold_output):
-                        all_equal = True
-                        for g, p in zip(entry.decoder_gold_output, entry.predicted_sequence):
-                            if g != p:
-                                all_equal = False
-                        if all_equal:
-                            correct += 1
+                    correct_out = 0.0
+
+                    for gold in entry.decoder_gold_output:
+                        if gold in entry.predicted_sequence:
+                            correct_out += 1
+                    correct += correct_out/len(entry.decoder_gold_output)
                     count += 1
             print "---\nAccuracy:\t%.2f" % (float(correct) * 100 / count)
 

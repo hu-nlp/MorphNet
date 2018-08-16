@@ -174,7 +174,6 @@ class Learner:
 
                 probs = []
                 losses = []
-                #TODO init tag
                 output_state = self.output_encoder.initial_state()
                 output_state = output_state.add_input(self.clookup[self.c2i["<st>"]])
                 for entry in conll_sentence:
