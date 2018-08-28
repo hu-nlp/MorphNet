@@ -16,7 +16,8 @@ if __name__ == '__main__':
     parser.add_option("--epochs", type="int", dest="epochs", default=30)
     # parser.add_option("--lr", type="float", dest="learning_rate", default=0.0001)
     parser.add_option("--outdir", type="string", dest="output", default="results")
-    parser.add_option("--lstmdims", type="int", dest="lstm_dims", default=512)
+    parser.add_option("--elstmdims", type="int", dest="enc_lstm_dims", default=512)
+    parser.add_option("--dlstmdims", type="int", dest="dec_lstm_dims", default=256)
     parser.add_option("--droputrate", type="float", dest="dropout_rate", default=0.3)
     parser.add_option("--dynet-seed", type="int", dest="seed", default=0)
     parser.add_option("--dynet-mem", type="int", dest="mem", default=0)
@@ -31,9 +32,9 @@ if __name__ == '__main__':
     eId = 0
 
     print 'Extracting vocabulary'
-    c2i, features = utils.vocab(options.conll_train)
+    c2i, o2i, features = utils.vocab(options.conll_train)
 
-    parser = learner.Learner(c2i, features, options)
+    parser = learner.Learner(c2i, o2i, features, options)
 
     highestScore = 0.0
     eId = 0

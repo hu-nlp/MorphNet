@@ -42,7 +42,8 @@ class ConllEntry:
 
 def vocab(conll_path):
     # Character vocabulary
-    c2i = {"_UNK": 0, "<s>": 1, "</s>":2, "<st>":3}
+    c2i = {"UNK" : 0}
+    o2i = {"UNK" : 0, "<s>": 1, "</s>" : 2,"<st>" : 3}
     features = set()
     tokens = []
 
@@ -57,26 +58,29 @@ def vocab(conll_path):
                 entry = ConllEntry(int(tok[0]), tok[1], tok[2], tok[3], tok[4], tok[5],
                                    int(tok[6]) if tok[6] != '_' else -1, tok[7], tok[8], tok[9])
 
-                chars_of_word = []
+                word_enc = []
+                output_enc = []
                 for char in tok[1]:
                     if char not in c2i:
                         c2i[char] = len(c2i)
-                    chars_of_word.append(c2i[char])
-                entry.idChars = chars_of_word
+                    if char not in o2i:
+                        o2i[char] = len(o2i)
+                    word_enc.append(c2i[char])
+                entry.idChars = word_enc
 
                 feats_of_word = []
                 for feat in tok[5].split("|"):
-                    if feat not in c2i:
-                        c2i[feat] = len(c2i)
-                        features.add(c2i[feat])
-                    feats_of_word.append(c2i[feat])
+                    if feat not in o2i:
+                        o2i[feat] = len(o2i)
+                        features.add(o2i[feat])
+                    feats_of_word.append(o2i[feat])
                 entry.idFeats = feats_of_word
                 tokens.append(entry)
 
-    return c2i, features
+    return c2i, o2i, features
 
 
-def read_conll(fh, c2i):
+def read_conll(fh, c2i, o2i):
     # Character vocabulary
     tokens = []
     for line in fh:
@@ -95,28 +99,28 @@ def read_conll(fh, c2i):
                     if char in c2i:
                         chars_of_word.append(c2i[char])
                     else:
-                        chars_of_word.append(c2i["_UNK"])
+                        chars_of_word.append(c2i["UNK"])
                 entry.idChars = chars_of_word
 
                 feats_of_word = []
                 for feat in tok[5].split("|"):
-                    if feat in c2i:
-                        feats_of_word.append(c2i[feat])
+                    if feat in o2i:
+                        feats_of_word.append(o2i[feat])
                     else:
-                        feats_of_word.append(c2i["_UNK"])
+                        feats_of_word.append(o2i["UNK"])
                 entry.idFeats = feats_of_word
 
-                decoder_input = [c2i["<s>"]]
+                decoder_input = [o2i["<s>"]]
                 for c in entry.lemma:
-                    if c in c2i:
-                        decoder_input.append(c2i[c])
+                    if c in o2i:
+                        decoder_input.append(o2i[c])
                     else:
-                        decoder_input.append(c2i["_UNK"])
+                        decoder_input.append(o2i["UNK"])
 
                 decoder_input.extend(entry.idFeats)
 
                 entry.decoder_gold_input = decoder_input
-                entry.decoder_gold_output = decoder_input[1:] + [c2i["</s>"]]
+                entry.decoder_gold_output = decoder_input[1:] + [o2i["</s>"]]
                 tokens.append(entry)
 
     if len(tokens) > 1:

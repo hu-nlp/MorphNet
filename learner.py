@@ -9,39 +9,43 @@ from utils import read_conll
 
 # TODO :
 """
-1 - Glorot init
-2 - 
 """
 
 
 class Learner:
-    def __init__(self, c2i, features, options):
+    def __init__(self, c2i, o2i, features, options):
         self.model = dy.ParameterCollection()
         random.seed(1)
         self.trainer = dy.AdamTrainer(self.model)
 
         self.dropput_rate = options.dropout_rate
-        self.ldims = options.lstm_dims
+        self.ldims = options.enc_lstm_dims
         self.cdims = options.cembedding_dims
+        self.odims = options.dec_lstm_dims
 
         self.c2i = c2i
+        self.o2i = o2i
+
         self.i2c = {self.c2i[k]:k for k in self.c2i}
         self.features = features
 
-        self.W_d = self.model.add_parameters((self.ldims, 2 * self.ldims))
-        self.W_db = self.model.add_parameters(self.ldims)
+        # Bi-lstm reducer
+        self.W_d = self.model.add_parameters((self.odims, 2 * self.ldims), init=dy.GlorotInitializer())
+        self.W_db = self.model.add_parameters(self.odims, init=dy.GlorotInitializer())
 
-        self.clookup = self.model.add_lookup_parameters((len(c2i), self.cdims))
+        self.clookup = self.model.add_lookup_parameters((len(c2i), self.cdims), init=dy.GlorotInitializer())
+        self.olookup = self.model.add_lookup_parameters((len(o2i), self.odims), init=dy.GlorotInitializer())
 
         self.word_encoder = RNNSequencePredictor(dy.VanillaLSTMBuilder(1, self.cdims, self.ldims, self.model))
         self.context_encoder = [dy.VanillaLSTMBuilder(1, self.ldims, self.ldims, self.model),
                                 dy.VanillaLSTMBuilder(1, self.ldims, self.ldims, self.model)]
-        self.output_encoder = dy.VanillaLSTMBuilder(1, self.cdims, self.ldims, self.model)
+        self.output_encoder = dy.VanillaLSTMBuilder(1, self.odims, self.ldims, self.model)
 
-        self.decoder = dy.VanillaLSTMBuilder(2, self.cdims, self.ldims, self.model)
+        self.decoder = dy.VanillaLSTMBuilder(1, self.odims, self.odims, self.model)
 
-        self.W_s = self.model.add_parameters((len(self.c2i), self.ldims))
-        self.W_sb = self.model.add_parameters((len(self.c2i)))
+        self.W_s = self.model.add_parameters((len(self.o2i), self.odims), init=dy.GlorotInitializer())
+        self.W_sb = self.model.add_parameters(len(self.o2i), init=dy.GlorotInitializer())
+
 
     def save(self, filename):
         self.model.save(filename)
@@ -58,7 +62,7 @@ class Learner:
     def predict(self, conll_path):
         start = time.time()
         with open(conll_path, 'r') as conllFP:
-            for iSentence, sentence in enumerate(read_conll(conllFP, self.c2i)):
+            for iSentence, sentence in enumerate(read_conll(conllFP, self.c2i, self.o2i)):
                 if iSentence % 500 == 0:
                     print "Prediction : Processing sentence number: %d" % iSentence, ", Time: %.2f" % (time.time() - start)
                     start = time.time()
@@ -94,23 +98,25 @@ class Learner:
                     entry.context_enc = dy.rectify(self.W_d.expr() * entry.context_enc + self.W_db.expr())
 
                 output_state = self.output_encoder.initial_state()
-                output_state = output_state.add_input(self.clookup[self.c2i["<st>"]])
+                output_state = output_state.add_input(self.olookup[self.o2i["<st>"]])
                 for entry in conll_sentence:
                     # III- Output encoding
                     entry.comb = entry.word_enc + output_state.output()
 
                     # IV- Decoder
-                    decoder_state = self.decoder.initial_state().set_s([entry.context_enc,entry.context_enc,entry.comb, entry.comb])
+
+                    #decoder_state = self.decoder.initial_state() #.set_s([entry.context_enc,entry.context_enc,entry.comb, entry.comb])
+                    decoder_state = self.decoder.initial_state([dy.zeros(256), entry.context_enc])#.set_s([dy.zeros(256), entry.context_enc])
                     entry.predicted_sequence = []
-                    predicted = self.c2i["<s>"]
+                    predicted = self.o2i["<s>"]
                     counter = 0
                     stop = False
                     while not stop:
                         counter += 1
-                        decoder_state = decoder_state.add_input(self.clookup[predicted])
+                        decoder_state = decoder_state.add_input(self.olookup[predicted])
                         probs = self.softmax(decoder_state.output())
                         predicted = probs.npvalue().argmax()
-                        if predicted == self.c2i["</s>"]:
+                        if predicted == self.o2i["</s>"]:
                             entry.predicted_sequence.append(predicted)
                             stop = True
                         elif counter > 50:
@@ -120,7 +126,7 @@ class Learner:
 
                     for seq_i in entry.predicted_sequence:
                         if seq_i in self.features:
-                            tag_embedding = self.clookup[seq_i]
+                            tag_embedding = self.olookup[seq_i]
                             output_state = output_state.add_input(tag_embedding)
 
                 yield conll_sentence
@@ -135,7 +141,7 @@ class Learner:
         total = 0.0
         start = time.time()
         with open(conll_path, 'r') as conllFP:
-            shuffledData = list(read_conll(conllFP, self.c2i))
+            shuffledData = list(read_conll(conllFP, self.c2i, self.o2i))
             random.shuffle(shuffledData)
 
             for iSentence, sentence in enumerate(shuffledData):
@@ -175,22 +181,20 @@ class Learner:
                 probs = []
                 losses = []
                 output_state = self.output_encoder.initial_state()
-                output_state = output_state.add_input(self.clookup[self.c2i["<st>"]])
+                output_state = output_state.add_input(self.olookup[self.o2i["<st>"]])
                 for entry in conll_sentence:
                     # III- Output encoding
                     entry.comb = entry.word_enc + output_state.output()
 
                     # IV- Decoder
-                    # TODO
-                    decoder_state = self.decoder.initial_state().set_s([entry.context_enc, entry.context_enc,entry.comb, entry.comb])
-
+                    decoder_state = self.decoder.initial_state([dy.zeros(256), entry.context_enc])#.set_s([dy.zeros(256), entry.context_enc])
                     for gold in entry.decoder_gold_input:
-                        decoder_state = decoder_state.add_input(self.clookup[gold])
+                        decoder_state = decoder_state.add_input(self.olookup[gold])
                         p = self.softmax(decoder_state.output())
                         probs.append(p)
 
                     for gold in entry.idFeats:
-                        tag_embedding = self.clookup[gold]
+                        tag_embedding = self.olookup[gold]
                         output_state = output_state.add_input(tag_embedding)
 
                     losses += [-dy.log(dy.pick(p, o)) for p, o in zip(probs, entry.decoder_gold_output)]
