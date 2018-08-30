@@ -33,15 +33,18 @@ class Learner:
         self.W_d = self.model.add_parameters((self.odims, 2 * self.ldims), init=dy.GlorotInitializer())
         self.W_db = self.model.add_parameters(self.odims, init=dy.GlorotInitializer())
 
+        # Reducer
+        self.Wred = self.model.add_parameters((self.odims, self.ldims), init=dy.GlorotInitializer())
+
         self.clookup = self.model.add_lookup_parameters((len(c2i), self.cdims), init=dy.GlorotInitializer())
         self.olookup = self.model.add_lookup_parameters((len(o2i), self.odims), init=dy.GlorotInitializer())
 
-        self.word_encoder = RNNSequencePredictor(dy.VanillaLSTMBuilder(1, self.cdims, self.ldims, self.model))
+        self.word_encoder = dy.VanillaLSTMBuilder(1, self.cdims, self.ldims, self.model)
         self.context_encoder = [dy.VanillaLSTMBuilder(1, self.ldims, self.ldims, self.model),
                                 dy.VanillaLSTMBuilder(1, self.ldims, self.ldims, self.model)]
         self.output_encoder = dy.VanillaLSTMBuilder(1, self.odims, self.ldims, self.model)
 
-        self.decoder = dy.VanillaLSTMBuilder(1, self.odims, self.odims, self.model)
+        self.decoder = dy.VanillaLSTMBuilder(2, self.odims, self.odims, self.model)
 
         self.W_s = self.model.add_parameters((len(self.o2i), self.odims), init=dy.GlorotInitializer())
         self.W_sb = self.model.add_parameters(len(self.o2i), init=dy.GlorotInitializer())
@@ -69,44 +72,48 @@ class Learner:
 
                 dy.renew_cg()
                 conll_sentence = [entry for entry in sentence if isinstance(entry, utils.ConllEntry)]
-                # I- Word encoding
+
+               # I- Word encoding
                 for entry in conll_sentence:
-                    c_embeddings = []
+
+                    char_lstm = self.word_encoder.initial_state()
+                    entry.word_enc = None
                     for c in entry.idChars:
                         c_embedding = self.clookup[c]
-                        c_embeddings.append(c_embedding)
-
-                    e_i = self.word_encoder.predict_sequence(c_embeddings)[-1]
-                    entry.word_enc = e_i
+                        char_lstm = char_lstm.add_input(c_embedding)
+                        entry.word_enc = char_lstm.output()
+                        entry.word_enc_c = char_lstm.s()[0]
+                        entry.word_enc_h = char_lstm.s()[1]
                     entry.context_lstms = [entry.word_enc, entry.word_enc]
 
                 # II- Context encoding
                 blstm_forward = self.context_encoder[0].initial_state()
                 blstm_backward = self.context_encoder[1].initial_state()
                 for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
-                    blstm_forward = blstm_forward.add_input(entry.word_enc)
-                    blstm_backward = blstm_backward.add_input(rentry.word_enc)
+                    blstm_forward = blstm_forward.add_input(entry.word_enc_h)
+                    blstm_backward = blstm_backward.add_input(rentry.word_enc_h)
 
-                    entry.context_lstms[1] = blstm_forward.output()
-                    rentry.context_lstms[0] = blstm_backward.output()
+                    entry.context_lstms[0] = blstm_forward.output()
+                    rentry.context_lstms[1] = blstm_backward.output()
 
                 for entry in conll_sentence:
                     entry.context_enc = dy.concatenate(entry.context_lstms)
 
+                # IV- Decoder
                 # Init for Context encoding
                 for entry in conll_sentence:
-                    entry.context_enc = dy.rectify(self.W_d.expr() * entry.context_enc + self.W_db.expr())
+                    entry.context_enc_h = dy.rectify(self.W_d.expr() * entry.context_enc + self.W_db.expr())
+                    entry.context_enc_c = dy.zeros(self.odims)
 
                 output_state = self.output_encoder.initial_state()
                 output_state = output_state.add_input(self.olookup[self.o2i["<st>"]])
                 for entry in conll_sentence:
                     # III- Output encoding
-                    entry.comb = entry.word_enc + output_state.output()
+                    entry.comb_h = self.Wred.expr() * (entry.word_enc_h + output_state.s()[1])
+                    entry.comb_c = self.Wred.expr() * (entry.word_enc_c + output_state.s()[0])
 
                     # IV- Decoder
-
-                    #decoder_state = self.decoder.initial_state() #.set_s([entry.context_enc,entry.context_enc,entry.comb, entry.comb])
-                    decoder_state = self.decoder.initial_state([dy.zeros(256), entry.context_enc])#.set_s([dy.zeros(256), entry.context_enc])
+                    decoder_state = self.decoder.initial_state().set_s([entry.context_enc_c, entry.comb_c, entry.context_enc_h, entry.comb_h])#.set_s([dy.zeros(256), entry.context_enc])
                     entry.predicted_sequence = []
                     predicted = self.o2i["<s>"]
                     counter = 0
@@ -151,24 +158,25 @@ class Learner:
 
                 # I- Word encoding
                 for entry in conll_sentence:
-                    c_embeddings = []
+
+                    char_lstm = self.word_encoder.initial_state()
+                    entry.word_enc = None
                     for c in entry.idChars:
                         c_embedding = self.clookup[c]
-                        c_embeddings.append(c_embedding)
-
-                    e_i = self.word_encoder.predict_sequence(c_embeddings)[-1]
-                    entry.word_enc = e_i
+                        char_lstm = char_lstm.add_input(c_embedding)
+                        entry.word_enc = char_lstm.output()
+                        entry.word_enc_c, entry.word_enc_h = char_lstm.s()
                     entry.context_lstms = [entry.word_enc, entry.word_enc]
 
                 # II- Context encoding
                 blstm_forward = self.context_encoder[0].initial_state()
                 blstm_backward = self.context_encoder[1].initial_state()
                 for entry, rentry in zip(conll_sentence, reversed(conll_sentence)):
-                    blstm_forward = blstm_forward.add_input(entry.word_enc)
-                    blstm_backward = blstm_backward.add_input(rentry.word_enc)
+                    blstm_forward = blstm_forward.add_input(entry.word_enc_h)
+                    blstm_backward = blstm_backward.add_input(rentry.word_enc_h)
 
-                    entry.context_lstms[1] = blstm_forward.output()
-                    rentry.context_lstms[0] = blstm_backward.output()
+                    entry.context_lstms[0] = blstm_forward.output()
+                    rentry.context_lstms[1] = blstm_backward.output()
 
                 for entry in conll_sentence:
                     entry.context_enc = dy.concatenate(entry.context_lstms)
@@ -176,7 +184,9 @@ class Learner:
                 # IV- Decoder
                 # Init for Context encoding
                 for entry in conll_sentence:
-                    entry.context_enc = dy.rectify(self.W_d.expr() * entry.context_enc + self.W_db.expr())
+                    entry.context_enc_h = dy.rectify(self.W_d.expr() * entry.context_enc + self.W_db.expr())
+                    entry.context_enc_c = dy.zeros(self.odims)
+
 
                 probs = []
                 losses = []
@@ -184,10 +194,11 @@ class Learner:
                 output_state = output_state.add_input(self.olookup[self.o2i["<st>"]])
                 for entry in conll_sentence:
                     # III- Output encoding
-                    entry.comb = entry.word_enc + output_state.output()
+                    entry.comb_h = self.Wred.expr() * (entry.word_enc_h + output_state.s()[1])
+                    entry.comb_c = self.Wred.expr() * (entry.word_enc_c + output_state.s()[0])
 
                     # IV- Decoder
-                    decoder_state = self.decoder.initial_state([dy.zeros(256), entry.context_enc])#.set_s([dy.zeros(256), entry.context_enc])
+                    decoder_state = self.decoder.initial_state().set_s([entry.context_enc_c, entry.comb_c, entry.context_enc_h, entry.comb_h])#.set_s([dy.zeros(256), entry.context_enc])
                     for gold in entry.decoder_gold_input:
                         decoder_state = decoder_state.add_input(self.olookup[gold])
                         p = self.softmax(decoder_state.output())
