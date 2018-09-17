@@ -26,6 +26,7 @@ class ConllEntry:
         self.predicted_sequence = None
 
         self.idChars = []
+        self.chars = []
         self.idFeats = []
         self.idWord = []
         self.decoder_gold_input = []
@@ -40,11 +41,9 @@ class ConllEntry:
 
 def vocab(conll_path):
     # Character vocabulary
-    c2i = {"UNK": 0, "<s>": 1, "</s>": 2}
-    w2i = {"UNK": 0}
-    features = set()
+    c2i = {"UNK": 0}
+    t2i = {"UNK": 0,"<s>": 1}
     tokens = []
-
     for line in open(conll_path, 'r'):
         tok = line.strip().split('\t')
         if not tok or line.strip() == '':
@@ -56,29 +55,25 @@ def vocab(conll_path):
                 entry = ConllEntry(int(tok[0]), tok[1], tok[2], tok[3], tok[4], tok[5],
                                    int(tok[6]) if tok[6] != '_' else -1, tok[7], tok[8], tok[9])
 
-                if entry.norm not in w2i:
-                    w2i[entry.norm] = len(w2i)
-                entry.idWord = w2i[entry.norm]
                 word_enc = []
-                for char in tok[1]:
+                for char in entry.norm:
                     if char not in c2i:
                         c2i[char] = len(c2i)
                     word_enc.append(c2i[char])
                 entry.idChars = word_enc
+                
+                
+                if entry.pos not in t2i:
+                    t2i[entry.pos] = len(t2i)
 
-                feats_of_word = []
-                for feat in tok[5].split("|"):
-                    if feat not in c2i:
-                        c2i[feat] = len(c2i)
-                        features.add(c2i[feat])
-                    feats_of_word.append(c2i[feat])
-                entry.idFeats = feats_of_word
+                for feat in entry.feats.split("|"):
+                    if feat not in t2i:
+                        t2i[feat] = len(t2i)
                 tokens.append(entry)
+    return c2i, t2i
 
-    return c2i, w2i, features
 
-
-def read_conll(fh, c2i, w2i):
+def read_conll(fh, c2i, t2i):
     # Character vocabulary
     tokens = []
     for line in fh:
@@ -92,38 +87,26 @@ def read_conll(fh, c2i, w2i):
             else:
                 entry = ConllEntry(int(tok[0]), tok[1], tok[2], tok[3], tok[4], tok[5],
                                    int(tok[6]) if tok[6] != '_' else -1, tok[7], tok[8], tok[9])
-                if entry.norm in w2i:
-                    entry.idWord = w2i[entry.norm]
-                else:
-                    entry.idWord = w2i["UNK"]
-
                 chars_of_word = []
-                for char in tok[1]:
+                for char in entry.norm:
                     if char in c2i:
                         chars_of_word.append(c2i[char])
                     else:
                         chars_of_word.append(c2i["UNK"])
                 entry.idChars = chars_of_word
-
+                
                 feats_of_word = []
-                for feat in tok[5].split("|"):
-                    if feat in c2i:
-                        feats_of_word.append(c2i[feat])
+                for feat in entry.feats.split("|"):
+                    if feat in t2i:
+                        feats_of_word.append(t2i[feat])
                     else:
-                        feats_of_word.append(c2i["UNK"])
+                        feats_of_word.append(t2i["UNK"])
                 entry.idFeats = feats_of_word
-
-                decoder_input = [c2i["<s>"]]
-                for c in entry.lemma:
-                    if c in c2i:
-                        decoder_input.append(c2i[c])
-                    else:
-                        decoder_input.append(c2i["UNK"])
-
-                decoder_input.extend(entry.idFeats)
-
-                entry.decoder_gold_input = decoder_input
-                entry.decoder_gold_output = decoder_input[1:] + [c2i["</s>"]]
+                
+                pos = t2i[entry.pos] if entry.pos in t2i else t2i["UNK"]
+                
+                entry.decoder_gold_input =  [t2i["<s>"]] + entry.idFeats + [pos] + [t2i["<s>"]] 
+                entry.decoder_gold_output = entry.idFeats + [pos]
                 tokens.append(entry)
 
     if len(tokens) > 1:
@@ -143,6 +126,7 @@ def normalize(word):
     w = re.sub(r"``", '"', w)
     w = re.sub(r"''", '"', w)
     return w
+
 
 
 def load_embeddings_file(file_name, lower=False, type=None):
